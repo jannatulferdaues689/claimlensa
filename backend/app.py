@@ -25,6 +25,7 @@ from typing import List
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 # Reuse the exact pipeline logic from the hackathon submission's code/ directory.
 # Point this at wherever you put schema.py / prompts.py / claim_processor.py.
@@ -151,6 +152,23 @@ def health():
     return {"status": "ok", "model_configured": get_client() is not None}
 
 
+@app.get("/api/debug")
+def debug_paths():
+    """Hit this on the live deploy to see exactly what the server sees on disk."""
+    frontend_dir = os.environ.get(
+        "FRONTEND_DIR", os.path.join(os.path.dirname(__file__), "..", "frontend")
+    )
+    frontend_dir_abs = os.path.abspath(frontend_dir)
+    return {
+        "cwd": os.getcwd(),
+        "__file__": os.path.abspath(__file__),
+        "frontend_dir_resolved": frontend_dir_abs,
+        "frontend_dir_exists": os.path.isdir(frontend_dir_abs),
+        "frontend_dir_contents": os.listdir(frontend_dir_abs) if os.path.isdir(frontend_dir_abs) else None,
+        "repo_root_listing": os.listdir(os.path.join(os.path.dirname(__file__), "..")),
+    }
+
+
 @app.post("/api/claims")
 async def submit_claim(
     claim_object: str = Form(...),
@@ -180,3 +198,34 @@ async def submit_claim(
     result["user_claim"] = user_claim
     result["image_ids"] = [im["id"] for im in images]
     return result
+
+
+# ---------------------------------------------------------------------------
+# Serve the frontend (frontend/index.html, styles.css, app.js) from this same
+# FastAPI app so a single deploy (e.g. one Render web service) serves both
+# the UI and the API -- no separate static host, no cross-origin requests.
+# Must be mounted LAST, after all /api/* routes above.
+# ---------------------------------------------------------------------------
+FRONTEND_DIR = os.environ.get(
+    "FRONTEND_DIR", os.path.join(os.path.dirname(__file__), "..", "frontend")
+)
+FRONTEND_DIR = os.path.abspath(FRONTEND_DIR)
+print(f"[startup] FRONTEND_DIR resolved to: {FRONTEND_DIR}", flush=True)
+print(f"[startup] FRONTEND_DIR exists: {os.path.isdir(FRONTEND_DIR)}", flush=True)
+
+if os.path.isdir(FRONTEND_DIR):
+    print(f"[startup] mounting static frontend from {FRONTEND_DIR}", flush=True)
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+else:
+    print(f"[startup] WARNING: frontend dir not found, '/' will 404. Check /api/debug.", flush=True)
+
+    @app.get("/")
+    def frontend_missing():
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Frontend directory not found on server.",
+                "frontend_dir_expected": FRONTEND_DIR,
+                "hint": "Visit /api/debug to inspect the deployed file layout.",
+            },
+        )
