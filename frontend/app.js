@@ -1,4 +1,4 @@
-const API_BASE = window.EVIDENCE_REVIEW_API || "http://localhost:8000";
+const API_BASE = window.EVIDENCE_REVIEW_API || "";
 
 const dropzone = document.getElementById("dropzone");
 const fileInput = document.getElementById("fileInput");
